@@ -10,9 +10,9 @@ from pathlib import Path
 
 # TODO tmr:
 # 1: create a cli interface with argparse which takes eml files. COMPLETED!
-# 2: fix domain alignment scan exiting early for no_dmarc
+# 2: fix domain alignment scan exiting early for no_dmarc. COMPLETED!
 # ^ --> do that by holding on to the penalty... if alignment completely fails afterwards, raise the penalty from 70 to a 100.
-# 3: fix the detail report for the two previous scans
+# 3: fix the detail report for the two previous scans COMPLETED!
 class HeaderScanner():
     
     
@@ -75,6 +75,11 @@ class HeaderScanner():
             received_headers = self.helper_get_received()
             
         if not received_headers:
+            
+            self.details.append(
+                f"WARNING=MODERATE | No received headers exist for the given email! couldn't do a routing check."
+            )
+            self.route_score = 0
             # Missing evidence is unknown, not a clean score.
             return {
                 "score": None,
@@ -83,6 +88,14 @@ class HeaderScanner():
                 "flags": {},
                 "details": ["No Received headers found."],
             }
+            
+        details_to_append = {
+            "time_travel": f"WARNING=HIGH | Time travel caught in hopping! this could be from MTA having some issues, or from fabriced headers.",
+            "spike": f"WARNING=MODERATE | Spikes were found between routes.",
+            "a_lot_of_routes": f"WARNING=MODERATE | received headers exceeded the maximum configured amount of allowed headers.",
+            "unparsable_on_time":f"WARNING=LOW | One or few received headers couldn't be parsed."
+        }
+        
         
         WEIGHTS = {
             "time_travel" : 40,
@@ -170,8 +183,15 @@ class HeaderScanner():
             for flag in suspicious_flags.values()
             if flag["triggered"]
         )
+        
+        for name, warning in details_to_append.items():
+            if suspicious_flags[name]["triggered"]:
+                self.details.append(warning)
         # The Received-check weights total 100, so dividing by 10 maps the
         # risk points to a consistent 0-10 scale.
+        
+            
+            
         self.route_score = received_risk_points
                 
         return {
@@ -183,9 +203,18 @@ class HeaderScanner():
     
     def check_authentication_results(self, authentication_header=None):
         
+        details_to_append = {
+            "failed_dkim":f"WARNING=HIGH | FAILED DKIM AUTHENTICATION!",
+            "failed_spf":f"WARNING=HIGH | FAILED SPF AUTHENTICATION!",
+            "missing_dkim": f"WARNING=MEDIUM | MISSING DKIM FLAG.",
+            "missing_spf": f"WARNING=MEDIUM | MISSING SPF FLAG."
+        }
+        
         WEIGHTS = {
         "failed_dkim": 50,
         "failed_spf": 50,
+        "missing_spf": 25,
+        "missing_dkim": 25
         }
         
         # IF ANY IS ABSENT, CHANGE THEIR WEIGHTS TO THE HALF, AND COUNT IT AS A FAIL! THIS IS REALLY IMPORTANT >:|
@@ -199,8 +228,6 @@ class HeaderScanner():
                 }
                 for name, weight in WEIGHTS.items()
         }
-        
-        details = []
         
         DKIM_PATTERN = re.compile(r'(?i)(?<![\w-])dkim=(pass|fail|none|neutral|policy|temperror|permerror)\b[^;]*?header\.[di]=@?([^\s;]+)')
         SPF_PATTERN = re.compile(r'(?i)(?<![\w-])spf=(pass|fail|softfail|neutral|none|temperror|permerror)\b[^;]*?smtp\.mailfrom=([^\s;]+)')
@@ -236,16 +263,17 @@ class HeaderScanner():
         # DMARC: [('pass', 'REJECT', 'neon.tech')]
         for flag_name, results in parsed_results.items():
             if not results:
-                suspicious_flags[flag_name]["triggered"] = True
-                suspicious_flags[flag_name]["weight"] = WEIGHTS[flag_name] / 2
-                suspicious_flags[flag_name]["details"] = (
-                    "Could not find a parseable authentication result."
-                )
-                
-                details.append(
-                f"{flag_name}: no parseable result found."
-                )
-                
+                if flag_name == "failed_dkim":
+                    suspicious_flags["missing_dkim"]["triggered"] = True
+                    suspicious_flags[flag_name]["details"] = (
+                        "Could not find a parseable authentication result for DKIM."
+                    )
+                else:
+                    suspicious_flags["missing_spf"]["triggered"] = True
+                    suspicious_flags[flag_name]["details"] = (
+                        "Could not find a parseable authentication result for SPF."
+                    )
+                    
                 continue
             
             # necessary for multiple passes from dkim if available.
@@ -267,9 +295,6 @@ class HeaderScanner():
                     f"Authentication did not pass: {', '.join(failed_statuses)}. "
                     f"Identity: {', '.join(identifiers)}."
                 )
-                details.append(
-                    f"{flag_name}: {suspicious_flags[flag_name]['details']}"
-                )
                 
             else:
                 suspicious_flags[flag_name]["result"] = ", ".join(statuses)
@@ -283,6 +308,10 @@ class HeaderScanner():
             if flag["triggered"]
         )
         
+        for name, warning in details_to_append.items():
+            if suspicious_flags[name]["triggered"] == True:
+                self.details.append(warning)
+        
         self.authentication_score = risk_points
         
         # Will be used in the second function.
@@ -293,7 +322,6 @@ class HeaderScanner():
             "score_scale": "risk_out_of_100",
             "evaluated": True,
             "flags": suspicious_flags,
-            "details": details,
         }
         
     def helper_get_from(self):
@@ -356,8 +384,8 @@ class HeaderScanner():
             self.details.append(
                 f" WARNING=MODERATE | The DMARC policy of this email is none, which allows for spoofing."
             )
-            
-            return suspicious_flags
+        
+        
         
         spf_result = self.spf_score
         dkim_result = self.dkim_score
@@ -424,7 +452,9 @@ class HeaderScanner():
                 )
                 
         if not alignment:
+
             suspicious_flags["dmarc_fail"]["Triggered"] = True
+            # Important: this basically ditches the none policy flag, and gets a newer, higher flag.
             self.domain_score = suspicious_flags["dmarc_fail"]["Weight"]
             self.details.append(
                 f" WARNING=CRITICAL | ALIGNMENT FAILED ON BOTH DKIM AND SPF."
@@ -437,13 +467,6 @@ class HeaderScanner():
                 f" WARNING=NEUTRAL | Alignment passed for the given email!"
             )
             
-            score = sum(
-                flag["Weight"]
-                for flag in suspicious_flags.values()
-                if flag["Triggered"]
-            )
-            
-            self.domain_score = score
             return suspicious_flags
                     
          

@@ -28,6 +28,7 @@ def main():
         headerScore = headerScan.get_header_score()
         
         print(headerScore) # for now:
+        print(headerScan.details)
 
 
 if __name__ == "__main__":
