@@ -3,6 +3,7 @@ import os
 import re
 import email
 import tldextract
+from email import policy
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -537,3 +538,51 @@ class HeaderScanner():
             **{result:value for result, value in sorted_results},
             "FINAL_HEADER_SCORING":round(final_header_score ,1)
         }
+        
+class BodyScanner():
+    
+    def __init__(self):
+        self.raw_email = None
+        self.email = None
+        
+        self.subject = None
+        
+        self.details = []
+    
+    def extract_email(self, source: str | os.PathLike | None = None):
+        
+        if source is None:
+            return "No email was provided to the BodyScanner."
+        
+        if isinstance(source, str): # Gmail API data
+            raw_bytes = base64.urlsafe_b64decode(source)
+        elif isinstance(source, os.PathLike):
+            raw_bytes = Path(source).read_bytes()
+        else:
+            raise TypeError("Email should be of type: Path (eml file), or str (returned by gmail's servers).")
+        
+        if raw_bytes:
+            self.raw_email = raw_bytes
+            
+            msg = email.message_from_bytes(raw_bytes, policy=policy.default)
+            self.email = msg
+            
+    def helper_get_subject(self):
+        
+        if not self.email:
+            self.details.append(
+                f"No email exists, couldn't extract the subject from the email!"
+            )
+
+            return
+        
+        subject_header = self.email.get("Subject", None)
+        
+        if not subject_header:
+            self.details.append(
+                f"Couldn't find a subject for the email!"
+            )
+            
+            return
+        
+        self.subject = str(subject_header)
