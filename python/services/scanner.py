@@ -3,6 +3,7 @@ import os
 import re
 import email
 import tldextract
+from bs4 import BeautifulSoup
 from email import policy
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -212,14 +213,12 @@ class HeaderScanner():
         }
         
         WEIGHTS = {
-        "failed_dkim": 50,
-        "failed_spf": 50,
-        "missing_spf": 25,
-        "missing_dkim": 25
+        "failed_dkim": 100,
+        "failed_spf": 100,
+        "missing_spf": 40,
+        "missing_dkim": 40
         }
-        
-        # IF ANY IS ABSENT, CHANGE THEIR WEIGHTS TO THE HALF, AND COUNT IT AS A FAIL! THIS IS REALLY IMPORTANT >:|
-        
+            
         suspicious_flags = {
                 name: {
                     "triggered": False,
@@ -308,6 +307,9 @@ class HeaderScanner():
             for flag in suspicious_flags.values()
             if flag["triggered"]
         )
+        
+        if risk_points >= 100:
+            risk_points = 100 # risk_points cap at 100 for cumulative scans like authentication.
         
         for name, warning in details_to_append.items():
             if suspicious_flags[name]["triggered"] == True:
@@ -429,7 +431,6 @@ class HeaderScanner():
                     parts = header.split(";")
                     for part in parts:
                         part = part.strip()
-                        print(part)
                         if part.startswith("d="):
                             dkim_alignment = self.check_relaxed(
                                 part.split("=", 1)[1].strip(),
@@ -464,6 +465,7 @@ class HeaderScanner():
             return suspicious_flags
         
         else:
+            self.domain_score = 0
             self.details.append(
                 f" WARNING=NEUTRAL | Alignment passed for the given email!"
             )
@@ -541,16 +543,22 @@ class HeaderScanner():
         
 class BodyScanner():
     
-    def __init__(self):
-        self.raw_email = None
+    def __init__(self, raw_email: str | os.PathLike | None = None):
+        self.raw_email = raw_email
         self.email = None
         
         self.subject = None
         
+        self.body_plain = None
+        self.body_plain_bytes = None
+        self.body_html = None
+        self.body_html_bytes = None
+        
         self.details = []
     
-    def extract_email(self, source: str | os.PathLike | None = None):
+    def extract_email(self, raw_email: str | os.PathLike | None = None):
         
+        source = self.raw_email if raw_email is None else raw_email
         if source is None:
             return "No email was provided to the BodyScanner."
         
@@ -586,3 +594,74 @@ class BodyScanner():
             return
         
         self.subject = str(subject_header)
+        
+    def helper_get_body(self):
+        
+        if not self.email:
+            self.details.append(
+                f"No email exists, couldn't extract the subject from the email."
+            )
+            
+            return
+        
+        body_in_bytes_plain = b""
+        body_in_bytes_html = b""
+        if self.email.is_multipart():
+            for part in self.email.walk():
+                content_type = part.get_content_type()
+                
+                if 'text/plain' in content_type:
+                    body_in_bytes_plain = part.get_payload(decode=True)
+                    self.body_plain = body_in_bytes_plain.decode("utf-8")
+                elif 'text/html' in content_type:
+                    body_in_bytes_html = part.get_payload(decode=True)
+                    self.body_html = body_in_bytes_html.decode("utf-8")
+        
+    def parse_html_body(self):
+        
+        if not self.email:
+            return "No email was provided."
+        
+        if not self.body_html:
+            self.helper_get_body()
+        
+        if self.body_html:
+            soup = BeautifulSoup(self.body_html, "html.parser")
+            
+            # clean-up:
+            for tag in soup(["script", "style", "head", "title", "meta", "noscript"]):
+                tag.decompose()
+                
+            links = []
+            seen = set()
+            for a in soup.find_all("a" , href=True):
+                href = a["href"].strip()
+                
+                if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+                    continue
+                if href in seen:
+                    continue
+                
+                seen.add(href)
+                links.append({
+                    "text": a.get_text(strip=True),
+                    "url": href,
+                })
+                
+            text_blocks = []
+            block_tags = ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th", "div", "span", "a"]
+            
+            for element in soup.find_all(block_tags):
+                # Only take elements whose text isn't already covered by a nested block
+                if element.find(block_tags):
+                    continue
+                text = element.get_text(" ", strip=True)
+                if text:
+                    text_blocks.append(text)
+                    
+            text_blocks = list(dict.fromkeys(text_blocks))
+            return {"text_blocks": text_blocks, "links": seen}
+
+        
+        
+        
