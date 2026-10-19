@@ -4,3 +4,9 @@ google-auth
 google-auth-oauthlib
 tldextract
 bs4
+emoji
+pandas
+numpy
+imbalanced-learn
+scikit-learn
+rich

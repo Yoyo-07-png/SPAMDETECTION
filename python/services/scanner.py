@@ -1,6 +1,7 @@
 import base64
 import os
 import re
+import emoji
 import email
 import tldextract
 from bs4 import BeautifulSoup
@@ -8,7 +9,7 @@ from email import policy
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-
+from .naive_bayes import NaiveBayesModel
 
 # TODO tmr:
 # 1: create a cli interface with argparse which takes eml files. COMPLETED!
@@ -554,6 +555,8 @@ class BodyScanner():
         self.body_html = None
         self.body_html_bytes = None
         
+        self.naive_model = NaiveBayesModel()
+        
         self.details = []
     
     def extract_email(self, raw_email: str | os.PathLike | None = None):
@@ -606,16 +609,25 @@ class BodyScanner():
         
         body_in_bytes_plain = b""
         body_in_bytes_html = b""
-        if self.email.is_multipart():
-            for part in self.email.walk():
-                content_type = part.get_content_type()
-                
-                if 'text/plain' in content_type:
-                    body_in_bytes_plain = part.get_payload(decode=True)
-                    self.body_plain = body_in_bytes_plain.decode("utf-8")
-                elif 'text/html' in content_type:
-                    body_in_bytes_html = part.get_payload(decode=True)
-                    self.body_html = body_in_bytes_html.decode("utf-8")
+        for part in self.email.walk():
+            if part.is_multipart():
+                continue  # container parts have no body of their own
+
+            if part.get_content_disposition() == "attachment":
+                continue  # skip .txt or .html attachments
+
+            payload = part.get_payload(decode=True)
+            if payload is None:
+                continue
+
+            charset = part.get_content_charset() or "utf-8"
+            text = payload.decode(charset, errors="replace")
+
+            content_type = part.get_content_type()
+            if content_type == "text/plain" and self.body_plain is None:
+                self.body_plain = text
+            elif content_type == "text/html" and self.body_html is None:
+                self.body_html = text
         
     def parse_html_body(self):
         
@@ -657,11 +669,46 @@ class BodyScanner():
                     continue
                 text = element.get_text(" ", strip=True)
                 if text:
+                    text = emoji.replace_emoji(text, "")
                     text_blocks.append(text)
                     
             text_blocks = list(dict.fromkeys(text_blocks))
-            return {"text_blocks": text_blocks, "links": seen}
+            return {
+                "text_blocks": text_blocks,
+                "links": links,
+                "format": "HTML",
+            }
 
+        if self.body_plain:
+            text_blocks = [
+                block.strip()
+                for block in self.body_plain.splitlines()
+                if block.strip()
+            ]
+            return {
+                "text_blocks": text_blocks,
+                "links": [],
+                "format": "Plain text",
+            }
+
+        return {"text_blocks": [], "links": [], "format": "Unknown"}
         
-        
-        
+    def get_model_analysis(self):
+
+        if self.naive_model.on_init != 0:
+            return "Failed to load the CSV file for training, or it couldn't be found!"
+
+        body_data = self.parse_html_body()
+        if isinstance(body_data, str):
+            return body_data
+
+        return self.naive_model.analyze(body_data["text_blocks"])
+
+    def get_model_prediction(self):
+        analysis = self.get_model_analysis()
+        if isinstance(analysis, str):
+            return analysis
+        return (
+            f"{analysis['label']} "
+            f"({analysis['confidence']:.0f}% Confidence)"
+        )
