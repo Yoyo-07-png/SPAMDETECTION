@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Gmail Email Analyzer",
+  "version": "1.0.0",
+  "description": "Analyze the open Gmail message and show its spam report.",
+  "permissions": [
+    "identity",
+    "downloads",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*"
+  ],
+  "oauth2": {
+    "client_id": "945926155003-n44hh3tlrov505jdpcn651knrh0uvci8.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.readonly"
+    ]
+  },
+  "action": {
+    "default_title": "Gmail Email Analyzer",
+    "default_popup": "popup.html"
+  }
+}

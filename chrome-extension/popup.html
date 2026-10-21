@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gmail Email Analyzer</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header class="app-header">
+        <div class="brand-mark" aria-hidden="true">✳</div>
+        <div>
+          <p class="eyebrow">MAIL INSPECTOR</p>
+          <h1>Gmail Email Analyzer</h1>
+        </div>
+      </header>
+
+      <section class="analyzer-card" aria-labelledby="analyze-heading">
+        <div class="analyzer-copy">
+          <span class="card-kicker">QUICK SCAN</span>
+          <h2 id="analyze-heading">Check this conversation</h2>
+          <p>Run a local scan of the open email's headers and content.</p>
+          <button id="analyze-open-button" type="button">
+            <span>Analyze open email</span>
+            <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      </section>
+
+      <p id="status" role="status" aria-live="polite">Your email stays on your device.</p>
+
+      <details class="search-panel">
+        <summary>Search your Gmail instead</summary>
+        <form id="search-form">
+          <label for="search-query">Gmail search</label>
+          <div class="search-controls">
+            <input
+              id="search-query"
+              name="query"
+              type="search"
+              placeholder="Search Gmail (default: inbox)"
+              autocomplete="off"
+            >
+            <button id="search-button" type="submit">Find emails</button>
+          </div>
+        </form>
+      </details>
+
+      <section id="report" aria-label="Email analysis report" hidden></section>
+      <ul id="messages" aria-label="Matching Gmail messages"></ul>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
