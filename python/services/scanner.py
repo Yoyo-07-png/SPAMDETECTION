@@ -544,7 +544,7 @@ class HeaderScanner():
         
 class BodyScanner():
     
-    def __init__(self, raw_email: str | os.PathLike | None = None):
+    def __init__(self, raw_email: str | bytes | os.PathLike | None = None):
         self.raw_email = raw_email
         self.email = None
         
@@ -559,13 +559,15 @@ class BodyScanner():
         
         self.details = []
     
-    def extract_email(self, raw_email: str | os.PathLike | None = None):
+    def extract_email(self, raw_email: str | bytes | os.PathLike | None = None):
         
         source = self.raw_email if raw_email is None else raw_email
         if source is None:
             return "No email was provided to the BodyScanner."
         
-        if isinstance(source, str): # Gmail API data
+        if isinstance(source, bytes):
+            raw_bytes = source
+        elif isinstance(source, str): # Gmail API data
             raw_bytes = base64.urlsafe_b64decode(source)
         elif isinstance(source, os.PathLike):
             raw_bytes = Path(source).read_bytes()
